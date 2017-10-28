@@ -2,47 +2,47 @@
 ## Detect the OS and version
 OSVER=""
 if [[ -e /etc/debian_version ]]; then
-	if cat /etc/debian_version | grep 'jessie'; then
-		OSVER="Ubuntu14"
-	fi
-	if cat /etc/debian_version | grep 'xenial'; then
-		OSVER="Ubuntu16"
-	fi
+    if cat /etc/debian_version | grep 'jessie'; then
+        OSVER="Ubuntu14"
+    fi
+    if cat /etc/debian_version | grep 'xenial'; then
+        OSVER="Ubuntu16"
+    fi
 fi
 if [[ -e /etc/redhat-release ]]; then
-	if cat /etc/redhat-release | grep 'release 6'; then
-		OSVER="CentOS6"
-	fi
-	if cat /etc/redhat-release | grep 'release 7'; then
-		OSVER="CentOS7"
-	fi
+    if cat /etc/redhat-release | grep 'release 6'; then
+        OSVER="CentOS6"
+    fi
+    if cat /etc/redhat-release | grep 'release 7'; then
+        OSVER="CentOS7"
+    fi
 fi
 if [[ -z $OSVER ]]; then
-	echo "This script only support CentOS6/7 or Ubuntu14/16."
-	exit 1
+    echo "This script only support CentOS6/7 or Ubuntu14/16."
+    exit 1
 fi
 
 ## Detect Public IP Address
 PUBIP=$(dig +short myip.opendns.com @resolver1.opendns.com)
 if [[ -z $PUBIP ]]; then
-	echo "Couldn't detect public IP Address. Make sure you got Internet access and dig command."
-	exit 1
+    echo "Couldn't detect public IP Address. Make sure you got Internet access and dig command."
+    exit 1
 fi
 
 ## Check number of args
 if [[ $# -ne 1 ]]; then
-	echo "Usage: $0 <domain>"
-	exit 1
+    echo "Usage: $0 <domain>"
+    exit 1
 fi
 
 ## Check if another mail server is running
 if lsof -Pi :25 -sTCP:LISTEN -t >/dev/null ; then
-	service postfix stop
-	## Check again
-	if lsof -Pi :25 -sTCP:LISTEN -t >/dev/null ; then
-		echo "Another mail service is running. Please shutdown/disable mail service first."
-		exit 1
-	fi
+    service postfix stop
+    ## Check again
+    if lsof -Pi :25 -sTCP:LISTEN -t >/dev/null ; then
+        echo "Another mail service is running. Please shutdown/disable mail service first."
+        exit 1
+    fi
 fi
 
 ## Preparing all the variables like IP, Hostname, etc, all of them from the container
@@ -58,10 +58,10 @@ echo "$PUBIP $HOSTNAME.$1 $HOSTNAME" >> /etc/hosts
 #Install a DNS Server
 echo "Installing dnsmasq DNS Server"
 if [[ -e /etc/debian_version ]]; then
-	apt-get update && apt-get install -y dnsmasq
+    apt-get update && apt-get install -y dnsmasq
 fi
 if [[ -e /etc/redhat-release ]]; then
-	yum -y update && yum install -y dnsmasq
+    yum -y update && yum install -y dnsmasq
 fi
 echo "Configuring DNS Server"
 mv /etc/dnsmasq.conf /etc/dnsmasq.conf.old
@@ -212,6 +212,10 @@ if [[ $OSVER == "CentOS6" ]]; then
     wget https://files.zimbra.com/downloads/8.7.11_GA/zcs-8.7.11_GA_1854.RHEL6_64.20170531151956.tgz
 fi
 if [[ $OSVER == "CentOS7" ]]; then
+    echo -n "Turn off firewall... "
+    systemctl disable firewalld
+    systemctl stop firewalld
+    echo "[done]"
     echo "Downloading Zimbra Collaboration 8.7.11 for CentOS 7"
     wget https://files.zimbra.com/downloads/8.7.11_GA/zcs-8.7.11_GA_1854.RHEL7_64.20170531151956.tgz
 fi
