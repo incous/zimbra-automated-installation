@@ -1,98 +1,88 @@
-#!/bin/bash -x
+#!/bin/bash
+## Detect the OS and version
+OSVER=""
+if [[ -e /etc/debian_version ]]; then
+	if cat /etc/debian_version | grep 'jessie'; then
+		OSVER="Ubuntu14"
+	fi
+	if cat /etc/debian_version | grep 'xenial'; then
+		OSVER="Ubuntu16"
+	fi
+fi
+if [[ -e /etc/redhat-release ]]; then
+	if cat /etc/redhat-release | grep 'release 6'; then
+		OSVER="CentOS6"
+	fi
+	if cat /etc/redhat-release | grep 'release 7'; then
+		OSVER="CentOS7"
+	fi
+fi
+if [[ -z $OSVER ]]; then
+	echo "This script only support CentOS6/7 or Ubuntu14/16."
+	exit 1
+fi
+
+## Detect Public IP Address
+PUBIP=$(dig +short myip.opendns.com @resolver1.opendns.com)
+if [[ -z $PUBIP ]]; then
+	echo "Couldn't detect public IP Address. Make sure you got Internet access and dig command."
+	exit 1
+fi
+
+## Check number of args
+if [[ $# -ne 1 ]]; then
+	echo "Usage: $0 <domain>"
+	exit 1
+fi
+
+## Check if another mail server is running
+if lsof -Pi :25 -sTCP:LISTEN -t >/dev/null ; then
+	service postfix stop
+	## Check again
+	if lsof -Pi :25 -sTCP:LISTEN -t >/dev/null ; then
+		echo "Another mail service is running. Please shutdown/disable mail service first."
+		exit 1
+	fi
+fi
+
 ## Preparing all the variables like IP, Hostname, etc, all of them from the container
+echo "mail" > /etc/hostname
+hostname $(cat /etc/hostname)
 RANDOMHAM=$(date +%s|sha256sum|base64|head -c 10)
 RANDOMSPAM=$(date +%s|sha256sum|base64|head -c 10)
 RANDOMVIRUS=$(date +%s|sha256sum|base64|head -c 10)
+ADMINPASS=$(date +%s|sha256sum|base64|head -c 10)
 HOSTNAME=$(hostname -s)
+echo "$PUBIP $HOSTNAME.$1 $HOSTNAME" >> /etc/hosts
 
 #Install a DNS Server
-if [ "$4" == "bind" ]; then
-    sudo apt-get update && sudo sudo apt-get install -y bind9 bind9utils bind9-doc
-    echo "Installing Bind DNS Server"
-    sed "s/-u/-4 -u/g" /etc/default/bind9 > /etc/default/bind9.new
-    mv /etc/default/bind9.new /etc/default/bind9
-    rm /etc/bind/named.conf.options
-cat <<EOF >>/etc/bind/named.conf.options
-options {
-directory "/var/cache/bind";
-
-listen-on { $2; }; # ns1 private IP address - listen on private network only
-allow-transfer { none; }; # disable zone transfers by default
-
-forwarders {
-8.8.8.8;
-8.8.4.4;
-};
-auth-nxdomain no; # conform to RFC1035
-#listen-on-v6 { any; };
-
-};
-EOF
-cat <<EOF >>/etc/bind/named.conf.local
-zone "$1" {
-        type master;
-        file "/etc/bind/db.$1";
-};
-EOF
-touch /etc/bind/db.$1
-cat <<EOF >/etc/bind/db.$1
-\$TTL  604800
-@      IN      SOA    ns1.$1. root.localhost. (
-                                2        ; Serial
-                        604800        ; Refresh
-                        86400        ; Retry
-                        2419200        ; Expire
-                        604800 )      ; Negative Cache TTL
-    ;
-    @     IN      NS      ns1.$1.
-    @     IN      A      $2
-    @     IN      MX     10     $HOSTNAME.$1.
-    $HOSTNAME     IN      A      $2
-    ns1     IN      A      $2
-    mail     IN      A      $2
-    pop3     IN      A      $2
-    imap     IN      A      $2
-    imap4     IN      A      $2
-    smtp     IN      A      $2
-EOF
-    sudo service bind9 restart
+echo "Installing dnsmasq DNS Server"
+if [[ -e /etc/debian_version ]]; then
+	apt-get update && apt-get install -y dnsmasq
 fi
-if [ "$4" == "dnsmasq" ]; then
-    echo "Installing dnsmasq DNS Server"
-    sudo apt-get update && sudo sudo apt-get install -y dnsmasq
-    echo "Configuring DNS Server"
-    mv /etc/dnsmasq.conf /etc/dnsmasq.conf.old
+if [[ -e /etc/redhat-release ]]; then
+	yum -y update && yum install -y dnsmasq
+fi
+echo "Configuring DNS Server"
+mv /etc/dnsmasq.conf /etc/dnsmasq.conf.old
 cat <<EOF >>/etc/dnsmasq.conf
 server=8.8.8.8
 listen-address=127.0.0.1
 domain=$1
 mx-host=$1,$HOSTNAME.$1,0
-address=/$HOSTNAME.$1/$2
+address=/$HOSTNAME.$1/$PUBIP
 EOF
-    sudo service dnsmasq restart
-else
-    echo "Installing dnsmasq DNS Server"
-    sudo apt-get update && sudo sudo apt-get install -y dnsmasq
-    echo "Configuring DNS Server"
-    mv /etc/dnsmasq.conf /etc/dnsmasq.conf.old
-cat <<EOF >>/etc/dnsmasq.conf
-server=8.8.8.8
-listen-address=127.0.0.1
-domain=$1
-mx-host=$1,$HOSTNAME.$1,0
-address=/$HOSTNAME.$1/$2
-EOF
-    sudo service dnsmasq restart
-fi
+service dnsmasq restart
+
 ##Preparing the config files to inject
-    echo "Creating the Scripts files"
-    mkdir /tmp/zcs && cd /tmp/zcs
-    touch /tmp/zcs/installZimbraScript
+echo "Creating the Scripts files"
+mkdir /tmp/zcs && cd /tmp/zcs
+touch /tmp/zcs/installZimbraScript
 cat <<EOF >/tmp/zcs/installZimbraScript
 AVDOMAIN="$1"
 AVUSER="admin@$1"
 CREATEADMIN="admin@$1"
-CREATEADMINPASS="$3"
+CREATEADMINPASS="$ADMINPASS"
 CREATEDOMAIN="$1"
 DOCREATEADMIN="yes"
 DOCREATEDOMAIN="yes"
@@ -110,11 +100,11 @@ IMAPSSLPORT="7993"
 IMAPSSLPROXYPORT="993"
 INSTALL_WEBAPPS="service zimlet zimbra zimbraAdmin"
 JAVAHOME="/opt/zimbra/common/lib/jvm/java"
-LDAPAMAVISPASS="$3"
-LDAPPOSTPASS="$3"
-LDAPROOTPASS="$3"
-LDAPADMINPASS="$3"
-LDAPREPPASS="$3"
+LDAPAMAVISPASS="$ADMINPASS"
+LDAPPOSTPASS="$ADMINPASS"
+LDAPROOTPASS="$ADMINPASS"
+LDAPADMINPASS="$ADMINPASS"
+LDAPREPPASS="$ADMINPASS"
 LDAPBESSEARCHSET="set"
 LDAPDEFAULTSLOADED="1"
 LDAPHOST="$HOSTNAME.$1"
@@ -156,13 +146,13 @@ USESPELL="yes"
 VERSIONUPDATECHECKS="TRUE"
 VIRUSQUARANTINE="virus-quarantine.$RANDOMVIRUS@$1"
 ZIMBRA_REQ_SECURITY="yes"
-ldap_bes_searcher_password="$3"
+ldap_bes_searcher_password="$ADMINPASS"
 ldap_dit_base_dn_config="cn=zimbra"
-ldap_nginx_password="$3"
+ldap_nginx_password="$ADMINPASS"
 ldap_url="ldap://$HOSTNAME.$1:389"
 mailboxd_directory="/opt/zimbra/mailboxd"
 mailboxd_keystore="/opt/zimbra/mailboxd/etc/keystore"
-mailboxd_keystore_password="$3"
+mailboxd_keystore_password="$ADMINPASS"
 mailboxd_server="jetty"
 mailboxd_truststore="/opt/zimbra/common/lib/jvm/java/jre/lib/security/cacerts"
 mailboxd_truststore_password="changeit"
@@ -178,7 +168,7 @@ zimbraFeatureBriefcasesEnabled="Enabled"
 zimbraFeatureTasksEnabled="Enabled"
 zimbraIPMode="ipv4"
 zimbraMailProxy="FALSE"
-zimbraMtaMyNetworks="127.0.0.0/8 $2/32 [::1]/128 [fe80::]/64"
+zimbraMtaMyNetworks="127.0.0.0/8 $PUBIP/32 [::1]/128 [fe80::]/64"
 zimbraPrefTimeZoneId="America/Los_Angeles"
 zimbraReverseProxyLookupTarget="TRUE"
 zimbraVersionCheckInterval="1d"
@@ -191,7 +181,7 @@ zimbra_require_interprocess_security="1"
 zimbra_server_hostname="$HOSTNAME.$1"
 INSTALL_PACKAGES="zimbra-core zimbra-ldap zimbra-logger zimbra-mta zimbra-snmp zimbra-store zimbra-apache zimbra-spell zimbra-memcached zimbra-proxy"
 EOF
-    touch /tmp/zcs/installZimbra-keystrokes
+touch /tmp/zcs/installZimbra-keystrokes
 cat <<EOF >/tmp/zcs/installZimbra-keystrokes
 y
 y
@@ -209,33 +199,30 @@ y
 y
 y
 EOF
-if [[ `lsb_release -rs` == "16.04" ]]; then
-    echo "Downloading Zimbra Collaboration 8.7.11 for Ubuntu 16.04"
+if [[ $OSVER == "Ubuntu16" ]]; then
+    echo "Downloading Zimbra Collaboration 8.7.11 for Ubuntu 16"
     wget https://files.zimbra.com/downloads/8.7.11_GA/zcs-8.7.11_GA_1854.UBUNTU16_64.20170531151956.tgz
-    tar xzvf zcs-*
-    echo "Installing Zimbra Collaboration just the Software"
-    cd /tmp/zcs/zcs-* && ./install.sh -s < /tmp/zcs/installZimbra-keystrokes
-    echo "Installing Zimbra Collaboration injecting the configuration"
-    /opt/zimbra/libexec/zmsetup.pl -c /tmp/zcs/installZimbraScript
-    su - zimbra -c 'zmcontrol restart'
-    echo "You can access now to your Zimbra Collaboration Server"
-    echo "Admin Console: https://"$2":7071"
-    echo "Web Client: https://"$2
 fi
-if [[ `lsb_release -rs` == "14.04" ]]; then
-    echo "Downloading Zimbra Collaboration 8.7.11 for Ubuntu 14.04"
+if [[ $OSVER == "Ubuntu14" ]]; then
+    echo "Downloading Zimbra Collaboration 8.7.11 for Ubuntu 14"
     wget https://files.zimbra.com/downloads/8.7.11_GA/zcs-8.7.11_GA_1854.UBUNTU14_64.20170531151956.tgz
-    tar xzvf zcs-*
-    echo "Installing Zimbra Collaboration just the Software"
-    cd /tmp/zcs/zcs-* && ./install.sh -s < /tmp/zcs/installZimbra-keystrokes
-    echo "Installing Zimbra Collaboration injecting the configuration"
-    /opt/zimbra/libexec/zmsetup.pl -c /tmp/zcs/installZimbraScript
-    su - zimbra -c 'zmcontrol restart'
-    echo "You can access now to your Zimbra Collaboration Server"
-    echo "Admin Console: https://"$2":7071"
-    echo "Web Client: https://"$2
 fi
+if [[ $OSVER == "CentOS6" ]]; then
+    echo "Downloading Zimbra Collaboration 8.7.11 for CentOS 6"
+    wget https://files.zimbra.com/downloads/8.7.11_GA/zcs-8.7.11_GA_1854.RHEL6_64.20170531151956.tgz
+fi
+if [[ $OSVER == "CentOS7" ]]; then
+    echo "Downloading Zimbra Collaboration 8.7.11 for CentOS 7"
+    wget https://files.zimbra.com/downloads/8.7.11_GA/zcs-8.7.11_GA_1854.RHEL7_64.20170531151956.tgz
+fi
+tar xzvf zcs-*
+echo "Installing Zimbra Collaboration just the Software"
+cd /tmp/zcs/zcs-* && ./install.sh -s < /tmp/zcs/installZimbra-keystrokes
+echo "Installing Zimbra Collaboration injecting the configuration"
+/opt/zimbra/libexec/zmsetup.pl -c /tmp/zcs/installZimbraScript
 su - zimbra -c 'zmcontrol restart'
 echo "You can access now to your Zimbra Collaboration Server"
-echo "Admin Console: https://"$2":7071"
-echo "Web Client: https://"$2
+echo "Admin Console: https://"$PUBIP":7071"
+echo "Username: admin@$1"
+echo "Password: $ADMINPASS"
+echo "Web Client: https://"$PUBIP
