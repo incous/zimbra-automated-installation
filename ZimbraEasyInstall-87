@@ -5,7 +5,7 @@ if [[ -e /etc/debian_version ]]; then
     if cat /etc/debian_version | grep 'jessie'; then
         OSVER="Ubuntu14"
     fi
-    if cat /etc/debian_version | grep 'xenial'; then
+    if cat /etc/debian_version | grep 'stretch'; then
         OSVER="Ubuntu16"
     fi
 fi
