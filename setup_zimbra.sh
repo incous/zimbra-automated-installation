@@ -1,6 +1,15 @@
 #!/bin/bash
-readonly DOMAIN_NAME=""
-readonly IP_ADDRESS=$(ip -4 addr show eth0 |grep "global" | awk '{print $2}' | cut -d "/" -f 1)
+### Description ###
+# It is a script that installs Zimbra Communication Edition on CentOS 7.x
+### Operation confirmation ###
+# CentOS 7.x
+### How to use ###
+# Copy the URL or download the file.
+# If you copied the URL, paste the copied URL into "URL specification" of the server addition screen "startup script".
+# If you downloaded the file, paste the script directly into the input field from "Text input" of the server addition screen "startup script".
+### Rewriting place ###
+readonly DOMAIN_NAME="" # The domain would be use for mail server
+readonly IP_ADDRESS=$(ip -4 addr show eth0 |grep "global" | awk '{print $2}' | cut -d "/" -f 1) # The public IP address of server
 
 ## Check if another mail server is running
 if lsof -Pi :25 -sTCP:LISTEN -t >/dev/null ; then
